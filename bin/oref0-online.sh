@@ -15,6 +15,8 @@ hci_address=$(hciconfig hci${hci_adapter} | grep Address | cut -d' ' -f 3)
 main() {
     MACs=$@
     HostAPDIP='10.29.29.1'
+    BT_INTERFACE_TYPE=ppp
+    BT_INTERFACE=${BT_INTERFACE_TYPE}0
     echo; echo Starting oref0-online at $(date).
     # if we are connected to wifi but don't have an IP, try to get one
     if iwgetid -r wlan0 | egrep -q "[A-Za-z0-9_]+"; then
@@ -34,19 +36,19 @@ main() {
         echo -n "At $(date) my local wifi IP is: "
         print_local_ip wlan0
     fi
-    if ifconfig | egrep -q "bnep0" >/dev/null; then
+    if ifconfig | egrep -q "$BT_INTERFACE" >/dev/null; then
         #if [[ $(ip -4 -o addr show dev bnep0 | awk '{split($4,a,"/");print a[1]}') = $(print_local_ip bnep0) ]]; then
             print_bluetooth_name
         #fi
         echo -n "At $(date) my local Bluetooth IP is: "
-        print_local_ip bnep0
+        print_local_ip $BT_INTERFACE
     else
         echo "At $(date) my Bluetooth PAN is not connected"
     fi
     echo -n "At $(date) my public IP is: "
     if check_ip; then
         stop_hotspot
-        if has_ip wlan0 && has_ip bnep0; then
+        if has_ip wlan0 && has_ip $BT_INTERFACE; then
             # if online via BT w/o a DHCP IP, cycle wifi
             if print_local_ip wlan0 | grep $HostAPDIP || ! has_ip wlan0; then
                 ifdown wlan0; ifup wlan0
@@ -55,18 +57,18 @@ main() {
         if ! test -f preferences.json \
             || ! jq -e .bt_with_wifi < preferences.json > /dev/null; then
             # if online via wifi, disconnect BT
-            if has_ip wlan0 && ifconfig | egrep -q "bnep0" >/dev/null; then
+            if has_ip wlan0 && ifconfig | egrep -q "$BT_INTERFACE" >/dev/null; then
                 bt_disconnect $MACs
                 #wifi_dhcp_renew
             fi
         else
-            if ifconfig | egrep -q "bnep0" >/dev/null; then
+            if ifconfig | egrep -q "$BT_INTERFACE" >/dev/null; then
                 echo "Preference bt_with_wifi is enabled - have bt iface; leaving enabled."
                 if ! has_ip wlan0; then
                     echo "Preference bt_with_wifi is enabled - enabling wifi."
                     wifi_dhcp_renew
                 fi
-                ifconfig | egrep -A6 "wlan|bnep"
+                ifconfig | egrep -A6 "wlan|$BT_INTERFACE_TYPE"
             else
                 if ! find /tmp/ -mmin -10 -name bt_with_wifi.last | grep bt_with_wifi.last 2>/dev/null >/dev/null; then
                     echo "Preference bt_with_wifi is enabled - have wifi connection, starting bt."
@@ -89,7 +91,7 @@ main() {
         else
             echo "Preference bt_with_wifi is enabled - starting bt regardless of wifi status."
             bt_connect $MACs
-            ifconfig | egrep -A6 "wlan|bnep"
+            ifconfig | egrep -A6 "wlan|$BT_INTERFACE_TYPE"
         fi
         #print_wifi_name
         if check_ip >/dev/null; then
@@ -147,6 +149,36 @@ function has_ip {
     ifconfig | grep -A1 $1 | grep -q "inet "
 }
 
+function bt_init {
+    oref0-bluetoothup
+    MAC=$1
+
+    if [ -z "$MAC" ]; then
+        echo "no MAC specified to bt_init"
+        return
+    fi
+
+    # securetether setup
+    CHANNEL=`sdptool browse $MAC | grep "SecureTether SPP" -A 8 | sed '8q;d' | sed s/[^0-9]*//g`
+    if [ -z "$CHANNEL" ]; then
+        bt_disconnect $MAC
+        echo "SecureTether isn't running on device $MAC"
+        return
+    else
+        echo "SecureTether SPP is available on channel $CHANNEL"
+    fi
+    
+    DEVICE=/dev/rfcomm${CHANNEL}
+    if [ ! -c "$DEVICE" ]; then
+        bt_disconnect $MAC
+        echo "Connecting to $MAC BT serial interface (channel $CHANNEL)"
+        rfcomm bind $CHANNEL $MAC $CHANNEL
+        chmod 666 $DEVICE
+    else
+        echo "$DEVICE already created for $MAC -- HOSTNAME $HOSTNAME" 
+    fi
+}
+
 function bt_connect {
     # loop over as many MACs as are provided as arguments
     for MAC; do
@@ -154,40 +186,31 @@ function bt_connect {
         if ! check_ip >/dev/null \
                || (test -f preferences.json \
                 && jq -e .bt_with_wifi < preferences.json > /dev/null); then
-            echo; echo "No Internet access detected, attempting to connect BT to $MAC"
-            if ! is_bash_process_running_named "oref0-bluetoothup"; then
-                oref0-bluetoothup
-            else
-                echo "oref0-bluetoothup already running"
-            fi
+            echo; echo "No Internet access detected (or bt_with_wifi), attempting to connect BT to $MAC"
+
+            bt_init $MAC # sets $DEVICE
             
+            PPPD_LOG=/var/log/pppd.log
+            INTERFACE=ppp0
             if ! test -f preferences.json \
                 || ! jq -e .bt_offline < preferences.json > /dev/null \
-                || ! ifconfig | egrep -q "bnep0" >/dev/null; then
+                || ! pgrep -u root pppd > /dev/null; then
+                #|| ! ifconfig | egrep -q "$INTERFACE" >/dev/null; then
                 echo "Attempting to connect to bt $MAC..."
-                sudo bt-pan -i $hci_address client $MAC -d
-              for i in {1..3}
-              do
-                sudo bt-pan -i $hci_address client $MAC
-                sudo dhclient bnep0
-              done
-                if ! has_ip bnep0; then
-                  bt_bnep0_cycle
-                fi
+                nohup /usr/sbin/pppd user $HOSTNAME password 1 call securetether $DEVICE > $PPPD_LOG 2>&1 &
+                sleep 3
             else
                 echo "Preference bt_offline enabled - already have a bt interface, not reconnecting it."
-                sudo dhclient bnep0
-                ifconfig | egrep -A6 "wlan|bnep"
-                if ! has_ip bnep0; then
-                  bt_bnep0_cycle
+                if ! has_ip $INTERFACE; then
+                  echo "something is wrong!!"
                 fi
             fi
-            if ifconfig | egrep -q "bnep0" >/dev/null; then
+            if ifconfig | egrep -q "$INTERFACE" >/dev/null; then
                 echo -n "Connected to Bluetooth with IP: "
-                print_local_ip bnep0
+                print_local_ip $INTERFACE
             fi
             # if we couldn't reach the Internet over wifi, but (now) have a bnep0 IP, release the wifi IP/route
-            if has_ip wlan0 && has_ip bnep0 && ! grep -q $HostAPDIP /etc/network/interfaces; then
+            if has_ip wlan0 && has_ip $INTERFACE && ! grep -q $HostAPDIP /etc/network/interfaces; then
                    if ! test -f preferences.json \
                    || ! jq -e .bt_with_wifi < preferences.json > /dev/null; then
                     echo "Have bt connection, releasing wifi"
@@ -202,12 +225,8 @@ function bt_connect {
 }
 
 function bt_disconnect {
-    echo "Disconnecting BT $MAC"
-    ifdown bnep0
-    # loop over as many MACs as are provided as arguments
-    for MAC; do
-        sudo bt-pan -i $hci_address client $MAC -d
-    done
+    echo "Disconnecting BT $1"
+    pkill -HUP -e -u root pppd
 }
 
 function wifi_dhcp_renew {
@@ -250,13 +269,6 @@ function stop_cycle {
     echo "Cycling wlan0"
     ifdown wlan0; ifup wlan0
 }
-
-function bt_bnep0_cycle {
-  echo -n "No IP address assigned, cycling the bnep0 interface"
-  sudo ifdown bnep0; sudo ifup bnep0;
-  echo "...done" 
-}
-
 
 function start_hotspot {
     echo
