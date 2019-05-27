@@ -28,10 +28,9 @@ DIR=""
 directory=""
 EXTRAS=""
 radio_locale="US"
-buildgofromsource=false
+radiotags="cc111x"
 ecc1medtronicversion="latest"
 ecc1dexcomversion="latest"
-radiotags="cc111x"
 hardwaretype=explorer-board
 
 # Echo text, but in bright-blue. Used for confirmation echo text. This takes
@@ -110,6 +109,9 @@ case $i in
     ;;
     -ht=*|--hardwaretype=*)
     hardwaretype="${i#*=}"
+    ;;
+    -rt=*|--radiotags=*)
+    radiotags="${i#*=}"
     ;;
     -npm=*|--npm_install=*)
     npm_option="${i#*=}"
@@ -345,65 +347,48 @@ if [[ -z "$DIR" || -z "$serial" ]]; then
         echocolor "Configuring for Explorer Board HAT. "
         ttyport=/dev/spidev0.0
         hardwaretype=explorer-hat
+	radiotags="cc111x"
     elif is_edison; then # Options for Edison (Explorer Board is default)
         echo "What kind of hardware setup do you have? Options are:"
         echo "1) Explorer Board"
-        echo "2) TI stick (DIY: SPI)"
+        echo "2) TI stick (SPI-connected)"
         echo "3) Other Radio (DIY: rfm69, cc11xx)"
         read -p "Please enter the number for your hardware configuration: [1] " -r
         case $REPLY in
-          2) echocolor "Configuring for SPI-connected TI stick. "; ttyport=/dev/spidev0.0; hardwaretype=386-spi;;
+          2) echocolor "Configuring for SPI-connected TI stick. "; ttyport=/dev/spidev0.0; hardwaretype=386-spi; radiotags="cc111x";;
           3)
              prompt_and_validate ttyport "What is your TTY port? (/dev/ttySOMETHING)" validate_ttyport
-             echocolor "Ok, we'll try TTY $ttyport then. "; echocolor "You will need to build Go binaries from source. "; buildgofromsource=true; hardwaretype=diy;;
-          *) echocolor "Yay! Configuring for Edison with Explorer Board. "; ttyport=/dev/spidev5.1; hardwaretype=edison-explorer;;
+             echocolor "Ok, we'll try TTY $ttyport then. "; echocolor "You will need to pick your radio type. "; hardwaretype=diy;;
+          *) echocolor "Yay! Configuring for Edison with Explorer Board. "; ttyport=/dev/spidev5.1; hardwaretype=edison-explorer; radiotags="cc111x";;
         esac
     elif is_pi; then # Options for raspberry pi, including Explorer HAT (default) if it's not auto-detected
 	echo "What kind of hardware setup do you have? Options are:"
 	echo "1) Explorer HAT"
 	echo "2) Radiofruit RFM69HCW Bonnet"
         echo "3) RFM69HCW (DIY: SPI)"
-        echo "4) TI Stick (DIY: SPI)"
+        echo "4) TI Stick (SPI-connected)"
 	echo "5) Other radio (DIY: rfm69, cc11xx)"
 	read -p "Please enter the number for your hardware configuration: [1] " -r
         case $REPLY in
-          2) echocolor "Configuring Radiofruit RFM69HCW Bonnet. "; ttyport=/dev/spidev0.1; hardwaretype=radiofruit;;
-          3) echocolor "Configuring RFM69HCW. "; ttyport=/dev/spidev0.1; hardwaretype=rfm69hcw;;
-          4) echocolor "Configuring for SPI-connected TI stick. "; ttyport=/dev/spidev0.0; hardwaretype=arm-spi;;
+          2) echocolor "Configuring Radiofruit RFM69HCW Bonnet. "; ttyport=/dev/spidev0.1; hardwaretype=radiofruit; radiotags="rfm69";;
+          3) echocolor "Configuring RFM69HCW. "; hardwaretype=diy;;
+          4) echocolor "Configuring for SPI-connected TI stick. "; ttyport=/dev/spidev0.0; hardwaretype=arm-spi; radiotags="cc111x";;
           5)
              prompt_and_validate ttyport "What is your TTY port? (/dev/ttySOMETHING)" validate_ttyport
-             echocolor "Ok, we'll try TTY $ttyport then. "; echocolor "You will need to build Go binaries from source. "; buildgofromsource=true; hardwaretype=diy;;
-          *) echocolor "Configuring Explorer Board HAT. "; ttyport=/dev/spidev0.0; hardwaretype=explorer-hat;;
+             echocolor "Ok, we'll try TTY $ttyport then. "; echocolor "You will need to pick your radio type. "; hardwaretype=diy;;
+          *) echocolor "Configuring Explorer Board HAT. "; ttyport=/dev/spidev0.0; hardwaretype=explorer-hat; radiotags="cc111x";;
         esac
-    else # If Edison or raspberry pi aren't detected, ask the user for their tty port and force Go binaries to be built from source
+    else # If Edison or raspberry pi aren't detected, ask the user for their tty port
         echo "Cannot auto-detect a supported platform (Edison or Raspberry Pi). Please make sure user 'edison' or 'pi' exists, or continue setup with manual configuration. "
         prompt_and_validate ttyport "What is your TTY port? (/dev/ttySOMETHING)" validate_ttyport
         echocolor "Ok, we'll try TTY $ttyport then. "
-        echocolor "You will need to build Go binaries from source."
-        buildgofromsource=true
+        echocolor "You will need to pick your radio type."
+        hardwaretype=diy
     fi
 
-    # Ask about downloading binaries, but only if hardware choices allow binaries to be used.
-    if [ $buildgofromsource = false ]; then
-      read -p "Would you like to [D]ownload released precompiled Go pump communication library or install an [U]nofficial (possibly untested) version.[D]/U " -r
-      if [[ $REPLY =~ ^[Uu]$ ]]; then
-        read -p "You could either build the Medtronic library from [S]ource, or type the version tag you would like to use, example 'v2019.01.21' [S]/<version> " -r
-        if [[ $REPLY =~ ^[Ss]$ ]]; then
-          buildgofromsource=true
-        else
-          ecc1medtronicversion="tags/$REPLY"
-          echo "Will use https://github.com/ecc1/medtronic/releases/$REPLY."
-          read -p "Also enter the ecc1/dexcom version, example 'v2018.12.05' <version> " -r
-          ecc1dexcomversion="tags/$REPLY"
-          echo "Will use https://github.com/ecc1/dexcom/$REPLY if Go-dexcom is needed."
-        fi
-      fi
-    fi
-
-    # Get details from the user about how binaries should be built from source, otherwise have setup download binaries. Default is cc111x.
-    if [ $buildgofromsource = true ]; then
-        echo "Building Go pump binaries from source"
-        echo "What type of radio do you use? Options are:"
+    # Get details from the user about how binaries should be built. Default is cc111x.
+    if [ $hardwaretype = diy ]; then
+        echo "What type of radio are you using? Options are:"
         echo "1) cc1110 or cc1111"
         echo "2) cc1101"
         echo "3) RFM69HCW on /dev/spidev0.0 (walrus)"
@@ -412,17 +397,29 @@ if [[ -z "$DIR" || -z "$serial" ]]; then
         read -p "Please enter the number for your radio configuration: [1] " -r
         case $REPLY in
           2) radiotags="cc1101";;
-          3) radiotags="rfm69 walrus";;
-          4) radiotags="rfm69";;
+          3) radiotags="rfm69 walrus"; ttyport=/dev/spidev0.0;;
+          4) radiotags="rfm69"; ttyport=/dev/spidev0.1;;
           5) read -p "Enter your radiotags: " -r; radiotags=$REPLY;;
           *) radiotags="cc111x";;
         esac
-        echo "Building Go pump binaries from source with " + "$radiotags" + " tags."
+        echo "Building Go pump binaries with " + "$radiotags" + " tags."
     else
-      echo "Downloading latest precompiled Go pump binaries."
-      ecc1medtronicversion="latest"
-      ecc1dexcomversion="latest"
+      echo "Building Go pump binaries with " + "$radiotags" + " tags."
+#      ecc1medtronicversion="latest"
+#      ecc1dexcomversion="latest"
     fi
+
+#TODO: add versioning support
+#    read -p "You could either build the Medtronic library from latest version, or type the version tag you would like to use, example 'v2019.01.21' [S]/<version> " -r
+#    if [[ $REPLY =~ ^[Vv]$ ]]; then
+#      ecc1medtronicversion="tags/$REPLY"
+#      echo "Will use https://github.com/ecc1/medtronic/releases/$REPLY."
+#      read -p "Also enter the ecc1/dexcom version, example 'v2018.12.05' <version> " -r
+#      ecc1dexcomversion="tags/$REPLY"
+#      echo "Will use https://github.com/ecc1/dexcom/$REPLY if Go-dexcom is needed."
+#    else 
+#      echo "Okay, building Medtronic library from latest version."
+#    fi
 
     if [[ ! -z "${ttyport}" ]]; then
       echo -e "\e[1mMedtronic pumps come in two types: WW (Worldwide) pumps, and NA (North America) pumps.\e[0m"
@@ -630,6 +627,9 @@ fi
 if [[ ! -z "$hardwaretype" ]]; then
     echo -n " --hardwaretype='$hardwaretype'" | tee -a $OREF0_RUNAGAIN
 fi
+if [[ ! -z "$radiotags" ]]; then
+    echo -n " --radiotags='$radiotags'" | tee -a $OREF0_RUNAGAIN
+fi
 echo; echo | tee -a $OREF0_RUNAGAIN
 chmod 755 $OREF0_RUNAGAIN
 
@@ -640,6 +640,56 @@ if prompt_yn "" N; then
 
     # Having the loop run in the background during setup slows things way down and lengthens the time before first loop
     service cron stop
+    # Kill oref0-pump-loop
+    pkill -f oref0-pump-loop
+
+    # Workaround for Jubilinux v0.2.0 (Debian Jessie) migration to LTS
+    if is_debian_jessie; then
+        # Disable valid-until check for archived Debian repos (expired certs)
+        echo "Acquire::Check-Valid-Until false;" | tee -a /etc/apt/apt.conf.d/10-nocheckvalid
+        # Replace apt sources.list with archive.debian.org locations
+        echo -e "deb http://security.debian.org/ jessie/updates main\n#deb-src http://security.debian.org/ jessie/updates main\n\ndeb http://archive.debian.org/debian/ jessie-backports main\n#deb-src http://archive.debian.org/debian/ jessie-backports main\n\ndeb http://archive.debian.org/debian/ jessie main contrib non-free\n#deb-src http://archive.debian.org/debian/ jessie main contrib non-free" > /etc/apt/sources.list
+    fi
+    
+    #Mount the Edison's fat32 partition at /usr/local/go to give us lots of room to install golang
+    if is_edison && [ -e /dev/mmcblk0p9 ] && ! mount | grep -qa mmcblk0p9 ; then
+        echo 'Removing golang from /usr partition...' && rm -rf /usr/local/go && mkdir -p /usr/local/go
+        if ! grep -qa "mmcblk0p9" /etc/fstab ; then
+          echo 'Adding Edison FAT32 partition to /etc/fstab...' && echo "/dev/mmcblk0p9 /usr/local/go auto defaults 1 1" >> /etc/fstab
+        fi
+        echo 'Mounting Edison FAT32 partition...' && mount -a
+    fi
+    
+    #TODO: remove this when IPv6 works reliably
+    echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
+
+    # update, upgrade, and autoclean apt-get
+    if file_is_recent /var/lib/apt/periodic/update-stamp 3600; then
+        echo apt-get update-stamp is recent: skipping
+    else
+        echo Running apt-get update
+        sudo apt-get update
+    fi
+    if file_is_recent /var/lib/apt/periodic/upgrade-stamp 3600; then
+        echo apt-get upgrade-stamp is recent: skipping
+    else
+        echo Running apt-get upgrade
+        sudo apt-get -y upgrade
+        # make sure hostapd and dnsmasq don't get re-enabled
+        update-rc.d -f hostapd remove
+        update-rc.d -f dnsmasq remove
+    fi
+    echo Running apt-get autoclean
+    sudo apt-get autoclean
+
+    # install/upgrade to latest node 8 if neither node 8 nor node 10+ LTS are installed
+    if ! nodejs --version | grep -e 'v8\.' -e 'v1[02468]\.' ; then
+        echo Upgrading to node 8
+        # Use nodesource setup script to add nodesource repository to sources.list.d
+        sudo bash -c "curl -sL https://deb.nodesource.com/setup_8.x | bash -" || die "Couldn't setup node 8"
+        # Install nodejs and npm from nodesource
+        sudo apt-get install -y nodejs || die "Couldn't install nodejs"
+    fi
 
     # Attempting to remove git to make install --nogit by default for existing users
     echo Removing any existing git in $directory/.git
@@ -688,21 +738,6 @@ if prompt_yn "" N; then
     else
         echo -n "Cloning oref0: "
         (cd $HOME/src && git clone git://github.com/openaps/oref0.git) || die "Couldn't clone oref0"
-    fi
-
-    # Workaround for Jubilinux v0.2.0 (Debian Jessie) migration to LTS
-    if is_debian_jessie; then
-        # Disable valid-until check for archived Debian repos (expired certs)
-        echo "Acquire::Check-Valid-Until false;" | tee -a /etc/apt/apt.conf.d/10-nocheckvalid
-        # Replace apt sources.list with archive.debian.org locations
-        echo -e "deb http://security.debian.org/ jessie/updates main\n#deb-src http://security.debian.org/ jessie/updates main\n\ndeb http://archive.debian.org/debian/ jessie-backports main\n#deb-src http://archive.debian.org/debian/ jessie-backports main\n\ndeb http://archive.debian.org/debian/ jessie main contrib non-free\n#deb-src http://archive.debian.org/debian/ jessie main contrib non-free" > /etc/apt/sources.list
-    fi
-
-    # install/upgrade to latest node 8 if neither node 8 nor node 10+ LTS are installed
-    if ! nodejs --version | grep -e 'v8\.' -e 'v1[02468]\.' ; then
-        echo Upgrading to node 8
-        sudo bash -c "curl -sL https://deb.nodesource.com/setup_8.x | bash -" || die "Couldn't setup node 8"
-        sudo apt-get install -y nodejs || die "Couldn't install nodejs"
     fi
 
     # Make sure jq version >1.5 is installed
@@ -823,27 +858,9 @@ if prompt_yn "" N; then
         mv -f /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
     fi
 
-    #TODO: remove this when IPv6 works reliably
-    echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
-
-    # update, upgrade, and autoclean apt-get
-    if file_is_recent /var/lib/apt/periodic/update-stamp 3600; then
-        echo apt-get update-stamp is recent: skipping
-    else
-        echo Running apt-get update
-        sudo apt-get update
+    if ! grep -qa "kernel.panic" /etc/sysctl.conf ; then
+      echo -e "# reboot rig 3 seconds after a kernel panic\nkernel.panic = 3" >> /etc/sysctl.conf
     fi
-    if file_is_recent /var/lib/apt/periodic/upgrade-stamp 3600; then
-        echo apt-get upgrade-stamp is recent: skipping
-    else
-        echo Running apt-get upgrade
-        sudo apt-get -y upgrade
-        # make sure hostapd and dnsmasq don't get re-enabled
-        update-rc.d -f hostapd remove
-        update-rc.d -f dnsmasq remove
-    fi
-    echo Running apt-get autoclean
-    sudo apt-get autoclean
 
     # configure ns
     if [[ ! -z "$NIGHTSCOUT_HOST" && ! -z "$API_SECRET" ]]; then
@@ -1257,40 +1274,32 @@ if prompt_yn "" N; then
     echo "Clearing retrieved apt packages to free space."
     apt-get autoclean && apt-get clean
 
-    # Install Go if needed, or set up paths
-    if [ $buildgofromsource = true ]; then
-      source $HOME/.bash_profile
-      if go version | grep go1.11.; then
-          echo Go already installed
-      else
-          echo "Installing Golang..."
-          if uname -m | grep armv; then
-              cd /tmp && wget -c https://storage.googleapis.com/golang/go1.11.linux-armv6l.tar.gz && tar -C /usr/local -xzvf /tmp/go1.11.linux-armv6l.tar.gz
-          elif uname -m | grep i686; then
-              cd /tmp && wget -c https://dl.google.com/go/go1.11.linux-386.tar.gz && tar -C /usr/local -xzvf /tmp/go1.11.linux-386.tar.gz
-          fi
-      fi
-      if ! grep GOROOT $HOME/.bash_profile; then
-          sed --in-place '/.*GOROOT*/d' $HOME/.bash_profile
-          echo 'GOROOT=/usr/local/go' >> $HOME/.bash_profile
-          echo 'export GOROOT' >> $HOME/.bash_profile
-      fi
-      if ! grep GOPATH $HOME/.bash_profile; then
-          sed --in-place '/.*GOPATH*/d' $HOME/.bash_profile
-          echo 'GOPATH=$HOME/go' >> $HOME/.bash_profile
-          echo 'export GOPATH' >> $HOME/.bash_profile
-          echo 'PATH=$PATH:/usr/local/go/bin:$GOROOT/bin:$GOPATH/bin' >> $HOME/.bash_profile
-          sed --in-place '/.*export PATH*/d' $HOME/.bash_profile
-          echo 'export PATH' >> $HOME/.bash_profile
-      fi
-    else
-      sed --in-place '/.*GOPATH*/d' $HOME/.bash_profile
-      echo 'PATH=$PATH:/usr/local/go/bin:$GOROOT/bin:$GOPATH/bin' >> $HOME/.bash_profile
-      sed --in-place '/.*export PATH*/d' $HOME/.bash_profile
-      echo 'export PATH' >> $HOME/.bash_profile
-    fi
-
+    # Install Golang
     mkdir -p $HOME/go
+    source $HOME/.bash_profile
+    if go version | grep go1.11.; then
+        echo Go already installed
+    else
+        echo "Installing Golang..."
+        if uname -m | grep armv; then
+            cd /tmp && wget -c https://storage.googleapis.com/golang/go1.11.linux-armv6l.tar.gz && tar -C /usr/local -xzvf /tmp/go1.11.linux-armv6l.tar.gz
+        elif uname -m | grep i686; then
+            cd /tmp && wget -c https://dl.google.com/go/go1.11.linux-386.tar.gz && tar -C /usr/local -xzvf /tmp/go1.11.linux-386.tar.gz
+        fi
+    fi
+    if ! grep GOROOT $HOME/.bash_profile; then
+        sed --in-place '/.*GOROOT*/d' $HOME/.bash_profile
+        echo 'GOROOT=/usr/local/go' >> $HOME/.bash_profile
+        echo 'export GOROOT' >> $HOME/.bash_profile
+    fi
+    if ! grep GOPATH $HOME/.bash_profile; then
+        sed --in-place '/.*GOPATH*/d' $HOME/.bash_profile
+        echo 'GOPATH=$HOME/go' >> $HOME/.bash_profile
+        echo 'export GOPATH' >> $HOME/.bash_profile
+        echo 'PATH=$PATH:/usr/local/go/bin:$GOROOT/bin:$GOPATH/bin' >> $HOME/.bash_profile
+        sed --in-place '/.*export PATH*/d' $HOME/.bash_profile
+        echo 'export PATH' >> $HOME/.bash_profile
+    fi
     source $HOME/.bash_profile
 
     #Necessary to "bootstrap" Go commands...
@@ -1300,61 +1309,51 @@ if prompt_yn "" N; then
       echo 916.55 > $directory/monitor/medtronic_frequency.ini
     fi
 
+    # Build pump communication binaries
+    # Exit if ttyport is not SPI. TODO: support UART-connected TI stick
     if [[ "$ttyport" =~ "spidev" ]]; then
-        #Turn on SPI for all pi-based setups. Not needed on the Edison
+        #Turn on SPI for all pi-based setups. Not needed on the Edison.
         if is_pi; then
           echo "Making sure SPI is enabled..."
           sed -i.bak -e "s/#dtparam=spi=on/dtparam=spi=on/" /boot/config.txt
         fi
-        #Translate hardware type into arch for Go binary downloads
-        if [[ "$hardwaretype" =~ "explorer-hat" || "$hardwaretype" =~ "arm-spi" ]]; then arch=arm-spi
-        elif [[ "$hardwaretype" =~ "radiofruit" || "$hardwaretype" =~ "rfm69hcw" ]]; then arch=arm-rfm69
-        elif [[ "$hardwaretype" =~ "edison-explorer" || "$hardwaretype" =~ "386-spi" ]]; then arch=386-spi
-        elif [[ "$hardwaretype" =~ "diy" ]]; then gobuildfromsource=true #make sure binaries aren't downloaded for DIY rigs
-        else arch=386-spi
-        fi
-    #TODO: Support non-SPI ports (TI stick over UART)
-    #elif [[ "$ttyport" =~ "tty" ]]; then
-    #    if [[ "$hardwaretype" =~ "386-uart" && is_edison ]]; then arch=386-uart
-    #    elif [[ "$hardwaretype" =~ "arm-uart" && is_pi ]]; then arch=arm-uart
+
+        #Make sure radiotags are set properly for different hardware types
+        #The only necessary one here at the moment is rfm69 (cc111x is the default in oref0-setup)
+        case $hardwaretype in
+          edison-explorer) radiotags="cc111x";;
+          explorer-hat) radiotags="cc111x";;
+          radiofruit) radiotags="rfm69";;
+          arm-spi) radiotags="cc111x";;
+          386-spi) radiotags="cc111x";;
+        esac
+
+        #Build Go binaries
+        go get -u -v -tags "$radiotags" github.com/ecc1/medtronic/... || die "Couldn't go get medtronic"
+        ln -sf $HOME/go/src/github.com/ecc1/medtronic/cmd/pumphistory/openaps.jq $directory/ || die "Couldn't softlink openaps.jq"
     else
         #TODO: write validate_ttyport and support non-SPI ports
         die "Unsupported ttyport. Exiting."
     fi
 
-    #Build Go binaries from source, or download prebuilt binaries package
-    if [ $buildgofromsource = true ]; then
-      go get -u -v -tags "$radiotags" github.com/ecc1/medtronic/... || die "Couldn't go get medtronic"
-      ln -sf $HOME/go/src/github.com/ecc1/medtronic/cmd/pumphistory/openaps.jq $directory/ || die "Couldn't softlink openaps.jq"
-    else
-      mkdir -p $HOME/go/bin && \
-      downloadUrl=$(curl -s https://api.github.com/repos/ecc1/medtronic/releases/$ecc1medtronicversion | \
-        jq --raw-output '.assets[] | select(.name | contains("'$arch'")) | .browser_download_url')
-      echo "Downloading Go pump binaries from:" $downloadUrl
-      wget -qO- $downloadUrl | tar xJv -C $HOME/go/bin || die "Couldn't download and extract Go pump binaries"
-      echo "Installing Go pump binaries ..."
-      ln -sf $HOME/go/bin/openaps.jq $directory/ || die "Couldn't softlink openaps.jq"
-    fi
-
     if [[ ${CGM,,} =~ "g4-go" ]]; then
         if [ ! -d $HOME/go/bin ]; then mkdir -p $HOME/go/bin; fi
-        echo "Installing or Compiling Go dexcom binaries ..."
-        if $buildgofromsource; then
-            if is_edison; then
-                go get -u -v -tags nofilter github.com/ecc1/dexcom/...
-            else
-                go get -u -v github.com/ecc1/dexcom/...
-            fi
+        echo "Compiling Go dexcom binaries ..."
+        if is_edison; then
+            go get -u -v -tags nofilter github.com/ecc1/dexcom/...
         else
-            arch=arm
-            if egrep -i "edison" /etc/passwd &>/dev/null; then
-                arch=386
-            fi
-            downloadUrl=$(curl -s https://api.github.com/repos/ecc1/dexcom/releases/$ecc1dexcomversion | \
-            jq --raw-output '.assets[] | select(.name | contains("'$arch'")) | .browser_download_url')
-            echo "Downloading Go dexcom binaries from:" $downloadUrl
-            wget -qO- $downloadUrl | tar xJv -C $HOME/go/bin || die "Couldn't download and extract Go dexcom binaries"
+            go get -u -v github.com/ecc1/dexcom/...
         fi
+#        else
+#            arch=arm
+#            if egrep -i "edison" /etc/passwd &>/dev/null; then
+#                arch=386
+#            fi
+#            downloadUrl=$(curl -s https://api.github.com/repos/ecc1/dexcom/releases/$ecc1dexcomversion | \
+#            jq --raw-output '.assets[] | select(.name | contains("'$arch'")) | .browser_download_url')
+#           echo "Downloading Go dexcom binaries from:" $downloadUrl
+#            wget -qO- $downloadUrl | tar xJv -C $HOME/go/bin || die "Couldn't download and extract Go dexcom binaries"
+#        fi
     fi
 
     copy_go_binaries
