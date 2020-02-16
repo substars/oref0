@@ -65,6 +65,10 @@ if (!module.parent) {
         process.exit(1);
     }
 
+    if(nsurl.endsWith('/')) {
+       nsurl = nsurl.substring(0, nsurl.length - 1);
+    }
+
     if (apisecret.indexOf('token=') !== 0 && apisecret.length !== 40) {
         var shasum = crypto.createHash('sha1');
         shasum.update(String(apisecret));
@@ -120,12 +124,13 @@ if (!module.parent) {
         // Basals
 
         var new_basal = [];
+        var decimals = 100; // always round basal rates to 0.01 U/h
 
         _.forEach(profiledata.basalprofile, function(basalentry) {
 
             var newEntry = {
                 time: '' + basalentry.start.substring(0, 5)
-                , value: '' + +(Math.round(basalentry.rate + 'e+3') + 'e-3')
+                , value: '' + Math.round( basalentry.rate  * decimals) / decimals
                 , timeAsSeconds: '' + basalentry.minutes * 60
             };
 
@@ -150,7 +155,8 @@ if (!module.parent) {
             var decimals = new_profile.units === 'mmol' ? 10 : 1;
 
             // Check if the input profile units don't match the Nightscout profile units
-            if (new_profile.units !== profiledata.bg_targets.units) {
+            if (new_profile.units && profiledata.bg_targets.units && 
+            		new_profile.units.toUpperCase() !== profiledata.bg_targets.units.toUpperCase()) {
                 // Set the conversion factor according to the units wanted
                 // 0.055 = divide by 18 (convert mg/dL to mmol/L)
                 // 18 = multiply by 18 (convert mmol/L to mg/dL)
@@ -193,8 +199,9 @@ if (!module.parent) {
             var conversionFactor = 1;
             var decimals = new_profile.units === 'mmol' ? 10 : 1;
 
-            // Check if the input profile units don't match the Nightscout profile units
-            if (profiledata.isfProfile.units && new_profile.units !== profiledata.isfProfile.units) {
+            // Check if the input profile units don't match the Nightscout profile units 
+            if (new_profile.units && profiledata.isfProfile.units && 
+            		new_profile.units.toUpperCase() !== profiledata.isfProfile.units.toUpperCase()) {
                 // Set the conversion factor according to the units wanted
                 // 0.055 = divide by 18 (convert mg/dL to mmol/L)
                 // 18 = multiply by 18 (convert mmol/L to mg/dL)
@@ -218,12 +225,13 @@ if (!module.parent) {
         // Carb ratios
 
         var new_carb_ratios = [];
+        var decimals = 10; // always round insulin to carb ratios to 0.1g
 
         _.forEach(profiledata.carb_ratios.schedule, function(carb_entry) {
 
             var new_entry = {
                 time: carb_entry.start.substring(0, 5)
-                , value: '' + carb_entry.ratio
+                , value: '' + Math.round( carb_entry.ratio * decimals) / decimals
                 , timeAsSeconds: '' + carb_entry.offset * 60
             };
 
